@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Ticket Workspace</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body { background-color: #f8f9fa; }
+    .section-box { background: white; border-radius: 8px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border-left: 5px solid #6c757d; }
+    .chat-container { height: 350px; overflow-y: auto; border: 1px solid #dee2e6; background-color: #f8f9fa; }
+    .message-box { max-width: 75%; padding: 10px; border-radius: 8px; margin-bottom: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    
+    .msg-incoming { background-color: #ffffff; border: 1px solid #dee2e6; margin-right: auto; }
+    
+    .msg-outgoing { background-color: #0d6efd; color: white; margin-left: auto; }
+    
+    .msg-internal { background-color: #ffc107; color: black; border: 1px solid #e0a800; }
+  </style>
+</head>
+<body>
+  <nav class="navbar navbar-dark bg-secondary mb-4">
+    <div class="container">
+      <span class="navbar-brand mb-0 h1">Ticket Workspace</span>
+      <button id="back-btn" class="btn btn-sm btn-light">Back to Dashboard</button>
+    </div>
+  </nav>
+
+  <div class="container mt-4 mb-5">
+    <div class="section-box">
+      <h4 id="display-ticket-id">Loading Ticket...</h4>
+      <p id="display-ticket-desc" class="text-muted">Please wait...</p>
+      
+      <div id="status-update-section" class="input-group mb-4 mt-3 w-50" style="display: none;">
+        <span class="input-group-text bg-light">Update Status</span>
+        <select id="update-status-select" class="form-select">
+          <option value="Open">Open</option>
+          <option value="In Progress">In Progress</option>
+          <option value="Resolved">Resolved</option>
+          <option value="Closed">Closed</option>
+        </select>
+        <button id="update-status-btn" class="btn btn-success">Save</button>
+      </div>
+
+      <hr>
+
+      <h6>Communication History</h6>
+      <div id="chat-history" class="p-3 mb-3 chat-container rounded">
+        <p class="text-center text-muted">Loading messages...</p>
+      </div>
+      
+      <form id="message-form" class="input-group">
+        <input type="text" id="message-text" class="form-control" placeholder="Type a reply..." required>
+        
+        <div id="internal-note-wrapper" class="input-group-text bg-white" style="display: none;">
+          <input id="is-internal" class="form-check-input mt-0 me-2" type="checkbox">
+          <label class="mb-0" style="font-size: 14px;">Internal Only</label>
+        </div>
+        
+        <button type="submit" class="btn btn-secondary">Send Message</button>
+      </form>
+
+    </div>
+  </div>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', async () => {
+      const token = localStorage.getItem('token');
+      const role = localStorage.getItem('userRole');
+      const userName = localStorage.getItem('userName');
+      
+      if (!token) {
+        alert('Please login first.');
+        window.location.href = 'login.html';
+        return;
+      }
+
+      document.getElementById('back-btn').addEventListener('click', () => {
+        if (role === 'Admin') window.location.href = 'admin-dashboard.html';
+        else if (role === 'Agent') window.location.href = 'agent-dashboard.html';
+        else window.location.href = 'customer-dashboard.html';
+      });
+
+      const urlParams = new URLSearchParams(window.location.search);
+      const dbTicketId = urlParams.get('id');
+
+      if (!dbTicketId) {
+        alert('No ticket ID provided.');
+        return;
+      }
+
+      if (role === 'Admin' || role === 'Agent') {
+        document.getElementById('status-update-section').style.display = 'flex';
+        document.getElementById('internal-note-wrapper').style.display = 'flex';
+      }
+
+      await loadTicketDetails(token, role, dbTicketId);
+      await loadMessages(token, dbTicketId, userName);
+
+      document.getElementById('update-status-btn').addEventListener('click', async () => {
+        const newStatus = document.getElementById('update-status-select').value;
+        try {
+          const response = await fetch(`http://localhost:5000/api/complaints/${dbTicketId}/status`, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ status: newStatus })
+          });
+          if (response.ok) alert('Status updated successfully!');
+          else alert('Failed to update status.');
+        } catch (error) {
+          console.error('Error:', error);
+        }
+      });
+
+      document.getElementById('message-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const textInput = document.getElementById('message-text');
+        const isInternal = document.getElementById('is-internal').checked;
+
+        try {
+          const response = await fetch(`http://localhost:5000/api/messages/${dbTicketId}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ messageText: textInput.value, isInternalNote: isInternal })
+          });
+
+          if (response.ok) {
+            textInput.value = '';
+            document.getElementById('is-internal').checked = false;
+            await loadMessages(token, dbTicketId, userName);
+          }
+        } catch (error) {
+          console.error('Error sending message:', error);
+        }
+      });
+    });
+
+    async function loadTicketDetails(token, role, dbTicketId) {
+      try {
+        let url = 'http://localhost:5000/api/complaints';
+        if (role === 'Admin') url = 'http://localhost:5000/api/complaints/all';
+        if (role === 'Agent') url = 'http://localhost:5000/api/complaints/assigned';
+
+        const response = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+        const tickets = await response.json();
+        
+        const ticket = tickets.find(t => t._id === dbTicketId);
+        
+        if (ticket) {
+          document.getElementById('display-ticket-id').textContent = `${ticket.ticketId}: ${ticket.title}`;
+          document.getElementById('display-ticket-desc').innerHTML = `
+            <strong>Status:</strong> ${ticket.status} | <strong>Priority:</strong> ${ticket.priority} <br><br>
+            ${ticket.description}
+          `;
+          if (role !== 'Customer') {
+            document.getElementById('update-status-select').value = ticket.status;
+          }
+        }
+      } catch (error) {
+        console.error('Error loading ticket details:', error);
+      }
+    }
+
+    async function loadMessages(token, dbTicketId, currentUserName) {
+      try {
+        const response = await fetch(`http://localhost:5000/api/messages/${dbTicketId}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const messages = await response.json();
+        
+        const chatBox = document.getElementById('chat-history');
+        chatBox.innerHTML = '';
+
+        if (messages.length === 0) {
+          chatBox.innerHTML = '<p class="text-center text-muted mt-5">No messages yet. Start the conversation!</p>';
+          return;
+        }
+
+        messages.forEach(msg => {
+          const isCurrentUser = msg.sender.name === currentUserName;
+          
+          const senderName = isCurrentUser ? 'You' : msg.sender.name;
+          const senderRole = msg.sender.role;
+          
+          let styleClass = 'msg-incoming'; 
+
+          if (isCurrentUser) {
+            styleClass = 'msg-outgoing';
+          }
+
+          if (msg.isInternalNote) {
+            styleClass = isCurrentUser ? 'msg-internal ms-auto' : 'msg-internal me-auto';
+          }
+
+          let noteLabel = msg.isInternalNote ? '<small class="float-end text-dark fw-bold ms-3">Internal Note</small>' : '';
+
+          chatBox.innerHTML += `
+            <div class="message-box ${styleClass}">
+              ${noteLabel}
+              <strong>${senderName} (${senderRole}):</strong><br>
+              ${msg.messageText}
+            </div>
+          `;
+        });
+
+        chatBox.scrollTop = chatBox.scrollHeight;
+      } catch (error) {
+        console.error('Error loading messages:', error);
+      }
+    }
+  </script>
+</body>
+</html>

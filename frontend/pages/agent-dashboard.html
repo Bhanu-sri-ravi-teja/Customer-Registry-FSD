@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Agent Dashboard</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body { background-color: #f8f9fa; }
+    .section-box { background: white; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border-left: 5px solid #198754; }
+  </style>
+</head>
+<body>
+  <nav class="navbar navbar-dark bg-success mb-4">
+    <div class="container">
+      <span class="navbar-brand mb-0 h1" id="agent-greeting">Agent Dashboard</span>
+      <button id="logout-btn" class="btn btn-sm btn-light text-success">Logout</button>
+    </div>
+  </nav>
+
+  <div class="container">
+    <div class="section-box w-75 mx-auto">
+      <h4>My Assigned Queue</h4>
+      <ul class="list-group mt-3" id="agent-queue">
+        <li class="list-group-item text-center text-muted">Loading your queue...</li>
+      </ul>
+    </div>
+  </div>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', async () => {
+      const token = localStorage.getItem('token');
+      const role = localStorage.getItem('userRole');
+      
+      if (!token || role !== 'Agent') {
+        alert('Access Denied. Agent privileges required.');
+        window.location.href = 'login.html';
+        return;
+      }
+
+      const userName = localStorage.getItem('userName');
+      if (userName) document.getElementById('agent-greeting').textContent = `Agent Dashboard - ${userName}`;
+
+      await fetchMyQueue(token);
+
+      document.getElementById('logout-btn').addEventListener('click', () => {
+        localStorage.clear();
+        window.location.href = 'login.html';
+      });
+    });
+
+    async function fetchMyQueue(token) {
+      try {
+        const response = await fetch('http://localhost:5000/api/complaints/assigned', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        const tickets = await response.json();
+        const queueContainer = document.getElementById('agent-queue');
+        queueContainer.innerHTML = '';
+
+        if (tickets.length === 0) {
+          queueContainer.innerHTML = '<li class="list-group-item text-center text-muted">Your queue is empty. Good job!</li>';
+          return;
+        }
+
+        tickets.forEach(ticket => {
+          let badgeColor = 'bg-warning text-dark';
+          if (ticket.status === 'Resolved' || ticket.status === 'Closed') badgeColor = 'bg-success';
+          if (ticket.status === 'Assigned') badgeColor = 'bg-info text-dark';
+
+          const customerName = ticket.customer ? ticket.customer.name : 'Unknown Customer';
+
+          queueContainer.innerHTML += `
+            <li class="list-group-item d-flex justify-content-between align-items-start mb-2 shadow-sm border-0 border-start border-4 border-success">
+              <div class="ms-2 me-auto">
+                <div class="fw-bold">${ticket.ticketId}: ${ticket.title}</div>
+                <small class="text-muted">Customer: ${customerName} | Priority: ${ticket.priority}</small>
+              </div>
+              <span class="badge ${badgeColor} rounded-pill me-3 mt-2">${ticket.status}</span>
+              <!-- Link to the detailed workspace for this ticket -->
+              <a href="ticket-detail.html?id=${ticket._id}" class="btn btn-sm btn-outline-success mt-1">Open Workspace</a>
+            </li>
+          `;
+        });
+      } catch (error) {
+        console.error('Error fetching queue:', error);
+        document.getElementById('agent-queue').innerHTML = '<li class="list-group-item text-center text-danger">Failed to load your queue.</li>';
+      }
+    }
+  </script>
+</body>
+</html>

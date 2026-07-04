@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Admin Dashboard</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body { background-color: #f8f9fa; }
+    .section-box { background: white; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border-left: 5px solid #dc3545; }
+  </style>
+</head>
+<body>
+  <nav class="navbar navbar-dark bg-danger mb-4">
+    <div class="container">
+      <span class="navbar-brand mb-0 h1" id="admin-greeting">Admin Dashboard</span>
+      <button id="logout-btn" class="btn btn-sm btn-light text-danger">Logout</button>
+    </div>
+  </nav>
+
+  <div class="container">
+    <div class="section-box">
+      <h4>System Overview (All Tickets)</h4>
+      <table class="table table-bordered mt-3">
+        <thead class="table-light">
+          <tr>
+            <th>Ticket ID</th>
+            <th>Customer</th>
+            <th>Title</th>
+            <th>Status</th>
+            <th>Assign Agent</th>
+          </tr>
+        </thead>
+        <tbody id="all-tickets-list">
+          <tr><td colspan="5" class="text-center text-muted">Loading system data...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    let agentsList = [];
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      const token = localStorage.getItem('token');
+      const role = localStorage.getItem('userRole');
+      
+      if (!token || role !== 'Admin') {
+        alert('Access Denied. Admin privileges required.');
+        window.location.href = 'login.html';
+        return;
+      }
+
+      const userName = localStorage.getItem('userName');
+      if (userName) document.getElementById('admin-greeting').textContent = `Admin Dashboard - ${userName}`;
+
+      await fetchAgents(token);
+      
+      await fetchAllTickets(token);
+      document.getElementById('logout-btn').addEventListener('click', () => {
+        localStorage.clear();
+        window.location.href = 'login.html';
+      });
+    });
+
+    async function fetchAgents(token) {
+      try {
+        const response = await fetch('http://localhost:5000/api/users', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const users = await response.json();
+        agentsList = users.filter(user => user.role === 'Agent');
+      } catch (error) {
+        console.error('Error fetching agents:', error);
+      }
+    }
+
+    async function fetchAllTickets(token) {
+      try {
+        const response = await fetch('http://localhost:5000/api/complaints/all', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const tickets = await response.json();
+        const ticketList = document.getElementById('all-tickets-list');
+        ticketList.innerHTML = '';
+
+        if (tickets.length === 0) {
+          ticketList.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No tickets found in the system.</td></tr>';
+          return;
+        }
+
+        tickets.forEach(ticket => {
+          let badgeColor = 'bg-danger';
+          if (ticket.status === 'Resolved' || ticket.status === 'Closed') badgeColor = 'bg-success';
+          if (ticket.status === 'In Progress') badgeColor = 'bg-warning text-dark';
+          if (ticket.status === 'Assigned') badgeColor = 'bg-info text-dark';
+
+          let agentOptions = '<option value="">Select Agent...</option>';
+          agentsList.forEach(agent => {
+            const isSelected = ticket.assignedAgent && ticket.assignedAgent._id === agent._id ? 'selected' : '';
+            agentOptions += `<option value="${agent._id}" ${isSelected}>${agent.name}</option>`;
+          });
+
+          ticketList.innerHTML += `
+            <tr>
+              <td><a href="ticket-detail.html?id=${ticket._id}">${ticket.ticketId}</a></td>
+              <td>${ticket.customer ? ticket.customer.name : 'Unknown'}</td>
+              <td>${ticket.title}</td>
+              <td><span class="badge ${badgeColor}">${ticket.status}</span></td>
+              <td>
+                <div class="input-group input-group-sm">
+                  <select class="form-select" id="agent-select-${ticket._id}">
+                    ${agentOptions}
+                  </select>
+                  <button class="btn btn-danger" onclick="assignTicket('${ticket._id}')">Assign</button>
+                </div>
+              </td>
+            </tr>
+          `;
+        });
+      } catch (error) {
+        console.error('Error fetching tickets:', error);
+        document.getElementById('all-tickets-list').innerHTML = '<tr><td colspan="5" class="text-center text-danger">Failed to load system data.</td></tr>';
+      }
+    }
+
+    async function assignTicket(ticketId) {
+      const token = localStorage.getItem('token');
+      const selectElement = document.getElementById(`agent-select-${ticketId}`);
+      const agentId = selectElement.value;
+
+      if (!agentId) {
+        alert('Please select an agent from the dropdown first.');
+        return;
+      }
+
+      try {
+        const response = await fetch(`http://localhost:5000/api/complaints/${ticketId}/assign`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ agentId })
+        });
+
+        if (response.ok) {
+          alert('Agent assigned successfully!');
+          fetchAllTickets(token);
+        } else {
+          const data = await response.json();
+          alert('Error: ' + data.message);
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        alert('Could not connect to the server.');
+      }
+    }
+  </script>
+</body>
+</html>
